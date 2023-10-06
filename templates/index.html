@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pose Estimation Web App</title>
+    <style>
+        #video-container {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        #video {
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+    <h1>Pose Estimation Web App</h1>
+    <div id="video-container">
+        <img id="video" src="{{ url_for('video_feed') }}" width="640" height="480">
+    </div>
+</body>
+</html>
