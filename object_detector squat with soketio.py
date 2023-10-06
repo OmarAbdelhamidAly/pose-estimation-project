@@ -2,8 +2,11 @@ import cv2
 import numpy as np
 from flask import Flask, render_template, Response
 import mediapipe as mp
+from flask_socketio import SocketIO
+import base64
 
 app = Flask(__name__)
+socketio = SocketIO(app)
 
 def calculate_angle(a, b, c):
     a = np.array(a)  # First
@@ -52,26 +55,26 @@ def generate_frames():
                 landmarks = results.pose_landmarks.landmark
 
                 # Get coordinates
-                left_hip = [landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x,
-                            landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y]
-                left_knee = [landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].x,
-                             landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].y]
-                left_ankle = [landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].x,
-                              landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].y]
+                hip = [landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x,
+                       landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y]
+                knee = [landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].x,
+                        landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].y]
+                ankle = [landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].x,
+                         landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value].y]
 
                 # Calculate angle
-                angle = calculate_angle(left_hip, left_knee, left_ankle)
+                angle = calculate_angle(hip, knee, ankle)
 
                 # Visualize angle
                 cv2.putText(image, str(angle),
-                            tuple(np.multiply(left_knee, [640, 480]).astype(int)),
+                            tuple(np.multiply(knee, [640, 480]).astype(int)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
 
                 # Squat counter logic
                 if angle > 160:
-                    stage = "up"
-                if angle < 100 and stage == 'up':
                     stage = "down"
+                if angle < 100 and stage == 'down':
+                    stage = "up"
                     counter += 1
                     print(counter)
 
@@ -83,7 +86,7 @@ def generate_frames():
             cv2.rectangle(image, (0, 0), (225, 73), (245, 117, 16), -1)
 
             # Rep data
-            cv2.putText(image, 'SQUATS', (15, 12),
+            cv2.putText(image, 'REPS', (15, 12),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
             cv2.putText(image, str(counter),
                         (10, 60),
@@ -105,14 +108,25 @@ def generate_frames():
             ret, buffer = cv2.imencode('.jpg', image)
             frame_data = buffer.tobytes()
 
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
+            # Emit frame data to the client
+            socketio.emit('processed_frame', {'frame_data': base64.b64encode(frame_data).decode('utf-8')}, namespace='/test            cv2.imshow('Frame', image)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
 
-        cap.release()
+    cap.release()
+    cv2.destroyAllWindows()
 
 @app.route('/video_feed')
 def video_feed():
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@socketio.on('connect', namespace='/test')
+def test_connect():
+    print('Client connected')
+
+@socketio.on('disconnect', namespace='/test')
+def test_disconnect():
+    print('Client disconnected')
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    socketio.run(app, debug=True, allow_unsafe_werkzeug=True, host='0.0.0.0')

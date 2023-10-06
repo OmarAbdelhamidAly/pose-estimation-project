@@ -2,8 +2,11 @@ import cv2
 import numpy as np
 from flask import Flask, render_template, Response
 import mediapipe as mp
+from flask_socketio import SocketIO
+import base64
 
 app = Flask(__name__)
+socketio = SocketIO(app)
 
 def calculate_angle(a, b, c):
     a = np.array(a)  # First
@@ -27,7 +30,7 @@ def generate_frames():
     mp_pose = mp.solutions.pose
     mp_drawing = mp.solutions.drawing_utils
 
-    # Push-up counter variables
+    # Curl counter variables
     counter = 0
     stage = None
 
@@ -52,22 +55,22 @@ def generate_frames():
                 landmarks = results.pose_landmarks.landmark
 
                 # Get coordinates
-                left_shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
-                                 landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
-                left_elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
-                              landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
-                left_wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
-                              landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
+                shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
+                            landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
+                elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
+                         landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
+                wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
+                         landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
 
                 # Calculate angle
-                angle = calculate_angle(left_shoulder, left_elbow, left_wrist)
+                angle = calculate_angle(shoulder, elbow, wrist)
 
                 # Visualize angle
                 cv2.putText(image, str(angle),
-                            tuple(np.multiply(left_elbow, [640, 480]).astype(int)),
+                            tuple(np.multiply(elbow, [640, 480]).astype(int)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
 
-                # Push-up counter logic
+                # Curl counter logic
                 if angle > 160:
                     stage = "down"
                 if angle < 30 and stage == 'down':
@@ -78,12 +81,12 @@ def generate_frames():
             except:
                 pass
 
-            # Render push-up counter
+            # Render curl counter
             # Setup status box
             cv2.rectangle(image, (0, 0), (225, 73), (245, 117, 16), -1)
 
             # Rep data
-            cv2.putText(image, 'PUSH-UPS', (15, 12),
+            cv2.putText(image, 'REPS', (15, 12),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
             cv2.putText(image, str(counter),
                         (10, 60),
@@ -105,14 +108,27 @@ def generate_frames():
             ret, buffer = cv2.imencode('.jpg', image)
             frame_data = buffer.tobytes()
 
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
+            # Emit frame data to the client
+            socketio.emit('processed_frame', {'frame_data': base64.b64encode(frame_data).decode('utf-8')}, namespace='/test')
 
-        cap.release()
+            cv2.imshow('Frame', image)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+    cap.release()
+    cv2.destroyAllWindows()
 
 @app.route('/video_feed')
 def video_feed():
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@socketio.on('connect', namespace='/test')
+def test_connect():
+    print('Client connected')
+
+@socketio.on('disconnect', namespace='/test')
+def test_disconnect():
+    print('Client disconnected')
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    socketio.run(app, debug=True,allow_unsafe_werkzeug=True, host='0.0.0.0')
